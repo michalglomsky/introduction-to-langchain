@@ -1,6 +1,3 @@
-# install the required packages:
-# pip install langchain-groq langchain-core python-dotenv
-
 from langchain_core.prompts import PromptTemplate
 from langchain_core.prompts import FewShotPromptTemplate
 from langchain_groq import ChatGroq
