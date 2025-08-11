@@ -2,9 +2,11 @@ import dotenv
 from langchain_groq import ChatGroq
 from langchain_core.tools import tool
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-import json
+from langchain_core.runnables import RunnableLambda, chain
+import json # for stage 4
 
 # Load environment variables from a .env file
 dotenv.load_dotenv()
@@ -76,37 +78,49 @@ def PlanetGeneralInfo(planet_name: str) -> str:
 # A list of all three tools
 tools_list = [PlanetDistenceSun, PlanetRevolutionPeriod, PlanetGeneralInfo]
 
+# Create a Runnable binding llm with tools
 model_with_tools = llm.bind_tools(tools_list)
 
-user_query = input()
+# Format the user query as a prompt template
+prompt = ChatPromptTemplate.from_template("Question: {query}")
 
-# Getting to the response:
+# Create a function as a Runnable to manage the tools
+@chain
+def call_tool(response):
+    """Takes response = model_with_tools.invoke(user_query) as an argument.
+    To be used in a chain"""
+    if response.tool_calls:
+        # 1. Get the details of the first tool call
+        tool_call = response.tool_calls[0]
+        tool_name = tool_call["name"]
 
-# 1. Invoke the model to get its decision on which tool to use
-first_response = model_with_tools.invoke(user_query)
+        # 2. Create a map to look up the actual tool function from its name
+        tool_map = {tool.name: tool for tool in tools_list}
 
-# 2. Check if the model decided to call a tool
-if first_response.tool_calls:
-    # Get the details of the first tool call
-    tool_call = first_response.tool_calls[0]
-    tool_name = tool_call["name"]
+        # 3. Select and invoke the chosen tool to get the string response
+        if tool_name in tool_map:
+            selected_tool = tool_map[tool_name]
+            tool_output_string = selected_tool.invoke(tool_call["args"])
 
-    # Create a map to look up the actual tool function from its name
-    tool_map = {tool.name: tool for tool in tools_list}
+            # NOT NEEDED in stage 5 of the project
+            # 4. Convert the model's `tool_calls` list to a JSON string
+            # tool_calls_json = json.dumps(response.tool_calls)
 
-    # 3. Select and invoke the chosen tool to get the string response
-    if tool_name in tool_map:
-        selected_tool = tool_map[tool_name]
-        tool_output_string = selected_tool.invoke(tool_call["args"])
-
-        # 4. Convert the model's `tool_calls` list to a JSON string
-        tool_calls_json = json.dumps(first_response.tool_calls)
-
-        # 5. Concatenate the tool's output and the JSON string to match the required format
-        final_output = tool_output_string + "\n" + tool_calls_json
-        print(final_output)
+            # 5. Concatenate the tool's output and the JSON string to match the required format
+            final_output = tool_output_string # + "\n" + tool_calls_json
+            print(final_output)
+        else:
+            print(f"Error: Model chose a tool named '{tool_name}' which is not available.")
     else:
-        print(f"Error: Model chose a tool named '{tool_name}' which is not available.")
-else:
-    # If the model didn't use a tool, print its direct text response
-    print(first_response.content)
+        # If the model didn't use a tool, print its direct text response
+        print(response.content)
+
+
+# Define the chain - essential step !
+chain = prompt | model_with_tools | call_tool
+
+# Pass the user's query to the chain
+chain.invoke({"query" : input()})
+
+# Print the chain for the testing
+print(chain)
